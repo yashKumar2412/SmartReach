@@ -12,3 +12,7 @@ sqlalchemy>=2.0.36
 # Agentic Tools (Required for web search and company verification)
 google-search-results>=2.4.2  # For SerpAPI
 # clearbit>=0.1.7  # Optional - For Clearbit company data (uncomment if using)
+
+# Testing
+pytest>=7.4.0  # For running functional tests
+httpx>=0.25.0  # Already included, needed for TestClient
