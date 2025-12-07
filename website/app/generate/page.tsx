@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
-import { Loader2, Check, Circle, Search, FileText, Star } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Loader2, Check, Circle, ChevronDown, ChevronUp, Building2 } from 'lucide-react'
 import AgentStatus from '@/components/AgentStatus'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 type Stage = 'input' | 'researching' | 'review' | 'generating' | 'refine' | 'complete'
 
@@ -15,72 +16,170 @@ interface Lead {
   selected: boolean
 }
 
+interface GeneratedMessage {
+  id: string
+  company_name: string
+  industry: string
+  location: string
+  content: string
+  quality_score: number
+}
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 export default function GeneratePage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [stage, setStage] = useState<Stage>('input')
   const [productService, setProductService] = useState('')
+  const [selectedService, setSelectedService] = useState('')
+  const [angle, setAngle] = useState('')
   const [area, setArea] = useState('')
   const [context, setContext] = useState('')
   const [maxLeads, setMaxLeads] = useState(10)
+  const [campaignId, setCampaignId] = useState<string>('')
   const [leads, setLeads] = useState<Lead[]>([])
-  const [generatedContent, setGeneratedContent] = useState('')
-  const [qualityScore, setQualityScore] = useState(0)
+  const [generatedMessages, setGeneratedMessages] = useState<GeneratedMessage[]>([])
+  const [selectedMessageIndex, setSelectedMessageIndex] = useState(0)
   const [researchProgress, setResearchProgress] = useState(0)
+  const [error, setError] = useState<string>('')
+  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set())
+  const [averageQualityScore, setAverageQualityScore] = useState<number>(0)
+  const [restoring, setRestoring] = useState(false)
+  const [services, setServices] = useState<string[]>([])
+  const [companyName, setCompanyName] = useState<string>('')
+  const [servicesLoading, setServicesLoading] = useState(true)
 
-  const handleStartResearch = () => {
-    if (!productService.trim() || !area.trim()) return
+  // Fetch company profile services
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/profile/`)
+        const data = await response.json()
+        setServices(data.services || [])
+        setCompanyName(data.company_name || '')
+      } catch (error) {
+        console.error('Failed to fetch profile:', error)
+      } finally {
+        setServicesLoading(false)
+      }
+    }
+    fetchProfile()
+  }, [])
+
+  // Check for campaign ID in URL to restore in-progress campaign
+  useEffect(() => {
+    const campaignIdParam = searchParams.get('campaign')
+    if (campaignIdParam) {
+      handleRestoreCampaign(campaignIdParam)
+    }
+  }, [searchParams])
+
+  const handleRestoreCampaign = async (id: string) => {
+    setRestoring(true)
+    setError('')
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/campaigns/${id}/restore`)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to restore campaign' }))
+        throw new Error(errorData.detail || 'Failed to restore campaign')
+      }
+      
+      const data = await response.json()
+      setCampaignId(data.campaign_id)
+      
+      // Restore form fields from campaign (we'll need to fetch campaign details)
+      const campaignResponse = await fetch(`${API_BASE_URL}/api/history/${id}`)
+      if (campaignResponse.ok) {
+        const campaignData = await campaignResponse.json()
+        setProductService(campaignData.product_service)
+        setArea(campaignData.area)
+        setContext(campaignData.context || '')
+        setMaxLeads(campaignData.max_leads)
+      }
+      
+      // Convert API response to Lead format
+      const convertedLeads: Lead[] = data.leads.map((lead: any) => ({
+        id: lead.id,
+        companyName: lead.name,
+        industry: lead.industry,
+        location: lead.location,
+        description: lead.description || '',
+        selected: false,
+      }))
+      
+      setLeads(convertedLeads)
+      setStage('review')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to restore campaign')
+    } finally {
+      setRestoring(false)
+    }
+  }
+
+  const handleStartResearch = async () => {
+    const serviceToUse = selectedService || productService
+    if (!serviceToUse.trim() || !area.trim()) {
+      setError('Please select a service and provide a target area.')
+      return
+    }
     
     setStage('researching')
     setResearchProgress(0)
+    setError('')
     
-    // Simulate research progress
-    const interval = setInterval(() => {
-      setResearchProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval)
-          // Mock leads data
-          setLeads([
-            {
-              id: '1',
-              companyName: 'TechCorp Inc.',
-              industry: 'Technology',
-              location: area,
-              description: 'Enterprise software solutions provider',
-              selected: false,
-            },
-            {
-              id: '2',
-              companyName: 'DataFlow Systems',
-              industry: 'Data Analytics',
-              location: area,
-              description: 'Business intelligence and analytics platform',
-              selected: false,
-            },
-            {
-              id: '3',
-              companyName: 'CloudScale Solutions',
-              industry: 'Cloud Services',
-              location: area,
-              description: 'Cloud infrastructure and migration services',
-              selected: false,
-            },
-            {
-              id: '4',
-              companyName: 'InnovateLabs',
-              industry: 'Software Development',
-              location: area,
-              description: 'Custom software development and consulting',
-              selected: false,
-            },
-          ])
-          setStage('review')
-          return 100
-        }
-        return prev + 10
+    // Simulate progress while API call is in progress
+    const progressInterval = setInterval(() => {
+      setResearchProgress((prev) => Math.min(prev + 5, 90))
+    }, 200)
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/campaigns/research`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          product_service: selectedService || productService,
+          area: area,
+          context: context || null,
+          angle: angle || null,
+          max_leads: maxLeads,
+        }),
       })
-    }, 500)
+      
+      clearInterval(progressInterval)
+      setResearchProgress(100)
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Research failed' }))
+        throw new Error(errorData.detail || 'Research failed')
+      }
+      
+      const data = await response.json()
+      setCampaignId(data.campaign_id)
+      
+      // Convert API response to Lead format
+      const convertedLeads: Lead[] = data.leads.map((lead: any) => ({
+        id: lead.id,
+        companyName: lead.name,
+        industry: lead.industry,
+        location: lead.location,
+        description: lead.description || '',
+        selected: false,
+      }))
+      
+      setLeads(convertedLeads)
+      setStage('review')
+    } catch (err) {
+      clearInterval(progressInterval)
+      setError(err instanceof Error ? err.message : 'Failed to start research')
+      setStage('input')
+    }
   }
 
-  const handleSelectLeads = () => {
+  const handleSelectLeads = async () => {
     const selectedLeads = leads.filter(lead => lead.selected)
     if (selectedLeads.length === 0) {
       alert('Please select at least one lead')
@@ -88,36 +187,144 @@ export default function GeneratePage() {
     }
     
     setStage('generating')
-    setQualityScore(0)
+    setError('')
     
-    // Simulate content generation
-    setTimeout(() => {
-      setGeneratedContent(`Subject: Partnership Opportunity - ${productService}
-
-Dear [Decision Maker],
-
-I hope this message finds you well. I've been researching companies in ${area} that could benefit from ${productService}.
-
-Based on our analysis, I believe there's a strong alignment between your company's needs and our solution. We've helped similar businesses in your industry achieve significant improvements.
-
-I'd love to schedule a brief call to discuss how we might collaborate. Would you be available for a 15-minute conversation next week?
-
-Best regards,
-[Your Name]`)
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/campaigns/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          campaign_id: campaignId,
+          selected_lead_ids: selectedLeads.map(lead => lead.id),
+          product_service: productService,
+          context: context || null,
+        }),
+      })
       
-      setQualityScore(85)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Content generation failed' }))
+        throw new Error(errorData.detail || 'Content generation failed')
+      }
+      
+      const data = await response.json()
+      const sortedMessages = [...data.messages].sort((a, b) => b.quality_score - a.quality_score)
+      setGeneratedMessages(sortedMessages)
+      setAverageQualityScore(data.average_quality_score || 0)
+      setExpandedMessages(new Set(sortedMessages.map((m: GeneratedMessage) => m.id)))
+      setSelectedMessageIndex(0)
       setStage('refine')
-    }, 2000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate content')
+      setStage('review')
+    }
   }
 
-  const handleApprove = () => {
-    setStage('complete')
+  const handleApprove = async () => {
+    setError('')
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/campaigns/save`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          campaign_id: campaignId,
+          product_service: productService,
+          area: area,
+          context: context || null,
+          max_leads: maxLeads,
+          leads_found: leads.length,
+          leads_selected: leads.filter(l => l.selected).length,
+          messages: generatedMessages,
+        }),
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to save campaign' }))
+        throw new Error(errorData.detail || 'Failed to save campaign')
+      }
+      
+      setStage('complete')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save campaign')
+    }
   }
 
   const toggleLeadSelection = (id: string) => {
     setLeads(leads.map(lead => 
       lead.id === id ? { ...lead, selected: !lead.selected } : lead
     ))
+  }
+
+  const toggleSelectAll = () => {
+    const allSelected = leads.every(lead => lead.selected)
+    setLeads(leads.map(lead => ({ ...lead, selected: !allSelected })))
+  }
+
+  const toggleMessage = (messageId: string) => {
+    setExpandedMessages(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId)
+      } else {
+        newSet.add(messageId)
+      }
+      return newSet
+    })
+  }
+
+  const handleRegenerateSingle = async () => {
+    // Regenerate all messages (backend doesn't support single regeneration)
+    setError('')
+    setStage('generating')
+    
+    try {
+      const selectedLeads = leads.filter(lead => lead.selected)
+      const response = await fetch(`${API_BASE_URL}/api/campaigns/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          campaign_id: campaignId,
+          selected_lead_ids: selectedLeads.map(lead => lead.id),
+          product_service: selectedService || productService,
+          context: context || null,
+          angle: angle || null,
+        }),
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Content generation failed' }))
+        throw new Error(errorData.detail || 'Content generation failed')
+      }
+      
+      const data = await response.json()
+      // Sort messages by quality_score descending (highest first)
+      const sortedMessages = [...data.messages].sort((a, b) => b.quality_score - a.quality_score)
+      setGeneratedMessages(sortedMessages)
+      setAverageQualityScore(data.average_quality_score || 0)
+      setExpandedMessages(new Set(sortedMessages.map((m: GeneratedMessage) => m.id)))
+      setStage('refine')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to regenerate content')
+      setStage('refine')
+    }
+  }
+
+  const getScoreColor = (score: number) => {
+    if (score >= 90) {
+      return 'bg-green-800 text-white'
+    } else if (score >= 75) {
+      return 'bg-green-600 text-white'
+    } else if (score >= 51) {
+      return 'bg-yellow-600 text-white'
+    } else {
+      return 'bg-red-600 text-white'
+    }
   }
 
   return (
@@ -174,6 +381,20 @@ Best regards,
           </div>
         </div>
 
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <p className="text-red-800">{error}</p>
+          </div>
+        )}
+
+        {/* Restoring Campaign */}
+        {restoring && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <p className="text-blue-800">Restoring campaign state...</p>
+          </div>
+        )}
+
         {/* Stage 1: Input */}
         {stage === 'input' && (
           <div className="bg-white rounded-lg shadow p-8">
@@ -181,17 +402,76 @@ Best regards,
             <div className="space-y-6 max-w-2xl">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Product or Service
+                  Select Service
                 </label>
+                {servicesLoading ? (
+                  <div className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                    <span className="text-sm text-gray-500">Loading services...</span>
+                  </div>
+                ) : services.length > 0 ? (
+                  <>
+                    <div className="relative">
+                      <select
+                        value={selectedService}
+                        onChange={(e) => {
+                          setSelectedService(e.target.value)
+                          if (e.target.value) {
+                            setProductService(e.target.value)
+                          }
+                        }}
+                        className="w-full px-4 py-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white appearance-none cursor-pointer hover:border-gray-400 transition-colors outline-none"
+                        style={{ WebkitAppearance: 'none', MozAppearance: 'none' }}
+                      >
+                        <option value="">Select a service...</option>
+                        {services.map((service) => (
+                          <option key={service} value={service}>
+                            {service}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                        <ChevronDown className="w-5 h-5 text-gray-400" />
+                      </div>
+                    </div>
+                    <p className="mt-2 text-sm text-gray-500">
+                      Or enter a custom service below
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-amber-600 mb-2">
+                    No services found. Please add services in your company profile on the dashboard.
+                  </p>
+                )}
                 <input
                   type="text"
                   value={productService}
-                  onChange={(e) => setProductService(e.target.value)}
-                  placeholder="e.g., Enterprise SaaS solutions, Cloud consulting services"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  onChange={(e) => {
+                    setProductService(e.target.value)
+                    if (!selectedService) {
+                      setSelectedService('')
+                    }
+                  }}
+                  placeholder={services.length > 0 ? "Or enter a custom service..." : "e.g., Enterprise SaaS solutions, Cloud consulting services"}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent mt-2"
                 />
                 <p className="mt-2 text-sm text-gray-500">
-                  Describe the product or service you're offering
+                  {services.length > 0 ? "Custom service description" : "Describe the product or service you're offering"}
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Your Angle / How You Can Help
+                </label>
+                <textarea
+                  value={angle}
+                  onChange={(e) => setAngle(e.target.value)}
+                  placeholder="e.g., We help companies reduce costs by 30% through automation, We specialize in migrating legacy systems to the cloud, We provide 24/7 support with guaranteed response times..."
+                  rows={3}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+                />
+                <p className="mt-2 text-sm text-gray-500">
+                  Describe your unique value proposition or how you can help potential leads
                 </p>
               </div>
               <div>
@@ -242,7 +522,7 @@ Best regards,
               </div>
               <button
                 onClick={handleStartResearch}
-                disabled={!productService.trim() || !area.trim()}
+                disabled={(!selectedService.trim() && !productService.trim()) || !area.trim()}
                 className="w-full px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors font-medium"
               >
                 Start Research →
@@ -269,6 +549,22 @@ Best regards,
             <p className="text-gray-600 mb-6">
               Found {leads.length} potential leads. Select the companies you'd like to generate content for.
             </p>
+            {/* Select All Button */}
+            <div className="mb-4 pb-4 border-b border-gray-200">
+              <button
+                onClick={toggleSelectAll}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded-lg transition-colors"
+              >
+                <input
+                  type="checkbox"
+                  checked={leads.length > 0 && leads.every(lead => lead.selected)}
+                  onChange={toggleSelectAll}
+                  className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <span>{leads.every(lead => lead.selected) ? 'Deselect All' : 'Select All'}</span>
+              </button>
+            </div>
             <div className="space-y-4 mb-6">
               {leads.map((lead) => (
                 <div
@@ -317,10 +613,7 @@ Best regards,
         {stage === 'generating' && (
           <div className="bg-white rounded-lg shadow p-8">
             <h2 className="text-2xl font-semibold text-gray-900 mb-6">Generating Content</h2>
-            <div className="space-y-4">
-              <AgentStatus name="Content Generator" status="running" progress={50} />
-              <AgentStatus name="Quality Evaluator" status="running" progress={30} />
-            </div>
+            <AgentStatus name="Generating Content" status="running" progress={50} />
             <p className="mt-4 text-gray-600">
               Creating personalized cold emails and evaluating quality...
             </p>
@@ -328,67 +621,158 @@ Best regards,
         )}
 
         {/* Stage 5: Refine Content */}
-        {stage === 'refine' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2">
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold text-gray-900">Generated Content</h2>
-                  <button
-                    onClick={() => setStage('generating')}
-                    className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
-                  >
-                    Regenerate
-                  </button>
+        {stage === 'refine' && generatedMessages.length > 0 && (
+          <div className="space-y-6">
+            {/* Average Quality Score */}
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Average Quality Score</h3>
+                  <p className="text-sm text-gray-600">Across all {generatedMessages.length} generated messages</p>
                 </div>
-                <textarea
-                  value={generatedContent}
-                  onChange={(e) => setGeneratedContent(e.target.value)}
-                  className="w-full h-96 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent font-mono text-sm"
-                />
+                <div className={`flex items-center justify-center w-24 h-24 rounded-lg ${getScoreColor(Math.round(averageQualityScore))}`}>
+                  <div className="text-center">
+                    <div className="text-4xl font-bold">{Math.round(averageQualityScore)}</div>
+                    <div className="text-xs opacity-90">/100</div>
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="space-y-6">
-              <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Quality Score</h3>
-                <div className="text-center mb-6">
-                  <div className="text-5xl font-bold text-primary-600 mb-2">
-                    {qualityScore}
+
+            {/* Action Buttons */}
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex gap-4">
+                <button
+                  onClick={handleApprove}
+                  className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                >
+                  Approve & Save All
+                </button>
+                <button
+                  onClick={handleRegenerateSingle}
+                  className="flex-1 px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                >
+                  Regenerate All
+                </button>
+              </div>
+            </div>
+
+            {/* Generated Messages - Collapsible */}
+            <div className="space-y-4">
+              <h2 className="text-2xl font-semibold text-gray-900">Generated Messages</h2>
+              {generatedMessages.map((message) => {
+                const isExpanded = expandedMessages.has(message.id)
+                return (
+                  <div key={message.id} className="bg-white rounded-lg shadow-lg overflow-hidden">
+                    <div className="flex items-center gap-4 p-6">
+                      <button
+                        onClick={() => toggleMessage(message.id)}
+                        className="flex items-center gap-4 flex-1 hover:bg-gray-50 -mx-2 px-2 py-2 rounded-lg transition-colors text-left"
+                      >
+                        <Building2 className="w-6 h-6 text-gray-400" />
+                        <div className="flex-1">
+                          <h3 className="text-lg font-semibold text-gray-900">{message.company_name}</h3>
+                          <div className="flex items-center gap-4 text-sm text-gray-600 mt-1">
+                            <span>{message.industry}</span>
+                            <span>•</span>
+                            <span>{message.location}</span>
+                          </div>
+                        </div>
+                      </button>
+                      <div className={`flex items-center justify-center w-20 h-20 rounded-lg ${getScoreColor(message.quality_score)} flex-shrink-0`}>
+                        <div className="text-center">
+                          <div className="text-3xl font-bold">{message.quality_score}</div>
+                          <div className="text-xs opacity-90">/100</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => toggleMessage(message.id)}
+                        className="p-2 hover:bg-gray-50 rounded-lg transition-colors"
+                      >
+                        {isExpanded ? (
+                          <ChevronUp className="w-5 h-5 text-gray-400" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5 text-gray-400" />
+                        )}
+                      </button>
+                    </div>
+                    
+                    {isExpanded && (
+                      <div className="border-t border-gray-200 p-6 bg-gray-50">
+                        <div className="mb-4">
+                          <h4 className="text-sm font-medium text-gray-700 mb-2">Generated Content</h4>
+                          <textarea
+                            value={message.content}
+                            onChange={(e) => {
+                              const updated = [...generatedMessages]
+                              const index = updated.findIndex(m => m.id === message.id)
+                              if (index !== -1) {
+                                updated[index].content = e.target.value
+                                setGeneratedMessages(updated)
+                              }
+                            }}
+                            className="w-full h-64 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent font-mono text-sm bg-white"
+                          />
+                        </div>
+                        <div className="flex gap-4">
+                          <button
+                            onClick={handleApprove}
+                            className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={handleRegenerateSingle}
+                            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                          >
+                            Regenerate
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="text-sm text-gray-600">Overall Score</div>
-                </div>
-              </div>
-              <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Actions</h3>
-                <div className="space-y-2">
-                  <button
-                    onClick={handleApprove}
-                    className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                  >
-                    Approve & Save
-                  </button>
-                  <button
-                    onClick={() => setStage('generating')}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                  >
-                    Request Revision
-                  </button>
-                </div>
-              </div>
+                )
+              })}
             </div>
           </div>
         )}
 
         {/* Stage 6: Complete */}
         {stage === 'complete' && (
-          <div className="bg-white rounded-lg shadow p-8 text-center">
-            <div className="w-20 h-20 mx-auto bg-green-100 rounded-full flex items-center justify-center mb-6">
-              <Check className="w-10 h-10 text-green-600" />
+          <div className="bg-white rounded-lg shadow p-8">
+            <div className="text-center mb-8">
+              <div className="w-20 h-20 mx-auto bg-green-100 rounded-full flex items-center justify-center mb-6">
+                <Check className="w-10 h-10 text-green-600" />
+              </div>
+              <h2 className="text-2xl font-semibold text-gray-900 mb-4">Campaign Complete!</h2>
+              <p className="text-gray-600 mb-6">
+                Your lead generation campaign has been successfully saved.
+              </p>
             </div>
-            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Campaign Complete!</h2>
-            <p className="text-gray-600 mb-6">
-              Your lead generation campaign has been saved. You can view it in the history page.
-            </p>
+            
+            {/* Summary */}
+            <div className="bg-gray-50 rounded-lg p-6 mb-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Campaign Summary</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-sm text-gray-600">Product/Service</div>
+                  <div className="text-base font-medium text-gray-900">{productService}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-600">Target Area</div>
+                  <div className="text-base font-medium text-gray-900">{area}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-600">Leads Found</div>
+                  <div className="text-base font-medium text-gray-900">{leads.length}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-600">Messages Generated</div>
+                  <div className="text-base font-medium text-gray-900">{generatedMessages.length}</div>
+                </div>
+              </div>
+            </div>
+            
             <div className="flex gap-4 justify-center">
               <a
                 href="/"
@@ -396,11 +780,19 @@ Best regards,
               >
                 Back to Dashboard
               </a>
+              {campaignId && (
+                <a
+                  href={`/history/${campaignId}`}
+                  className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                >
+                  View Campaign →
+                </a>
+              )}
               <a
                 href="/history"
-                className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                className="px-6 py-2 border border-primary-600 text-primary-600 rounded-lg hover:bg-primary-50 transition-colors"
               >
-                View History →
+                View All History →
               </a>
             </div>
           </div>
