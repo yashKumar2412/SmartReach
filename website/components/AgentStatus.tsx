@@ -1,5 +1,7 @@
 'use client'
 
+import { Circle, Loader2, Check, X } from 'lucide-react'
+
 interface AgentStatusProps {
   name: string
   status: 'idle' | 'running' | 'completed' | 'error'
@@ -15,17 +17,17 @@ export default function AgentStatus({ name, status, progress }: AgentStatusProps
   }
 
   const statusIcons = {
-    idle: '○',
-    running: '⟳',
-    completed: '✓',
-    error: '✗',
+    idle: <Circle className="w-4 h-4" />,
+    running: <Loader2 className="w-4 h-4 animate-spin" />,
+    completed: <Check className="w-4 h-4" />,
+    error: <X className="w-4 h-4" />,
   }
 
   return (
     <div className="bg-white rounded-lg shadow p-4">
       <div className="flex items-center justify-between mb-2">
         <h3 className="font-semibold text-gray-900">{name}</h3>
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[status]}`}>
+        <span className={`px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 ${statusColors[status]}`}>
           {statusIcons[status]} {status}
         </span>
       </div>

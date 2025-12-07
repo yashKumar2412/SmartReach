@@ -7,10 +7,8 @@ export default function Navbar() {
   const pathname = usePathname()
 
   const navItems = [
-    { href: '/', label: 'Dashboard' },
-    { href: '/leads', label: 'Leads' },
-    { href: '/workflow', label: 'Workflow' },
-    { href: '/content', label: 'Content' },
+    { href: '/generate', label: 'Generate Leads' },
+    { href: '/history', label: 'History' },
   ]
 
   return (
@@ -19,7 +17,9 @@ export default function Navbar() {
         <div className="flex justify-between h-16">
           <div className="flex">
             <div className="flex-shrink-0 flex items-center">
-              <h1 className="text-2xl font-bold text-primary-600">SmartReach</h1>
+              <Link href="/" className="text-2xl font-bold text-primary-600 hover:text-primary-700 transition-colors">
+                SmartReach
+              </Link>
             </div>
             <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
               {navItems.map((item) => (
