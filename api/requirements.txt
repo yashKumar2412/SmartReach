@@ -1,9 +1,14 @@
 # SmartReach API Dependencies
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-python-dotenv==1.0.0
-openai==1.3.0
-httpx==0.25.0
-requests==2.31.0
-sqlalchemy==2.0.23
+# Updated versions for Python 3.13 compatibility
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.10.0  # Updated for Python 3.13 support
+python-dotenv>=1.0.0
+openai>=1.54.0
+httpx>=0.27.0
+requests>=2.32.0
+sqlalchemy>=2.0.36
+
+# Agentic Tools (Required for web search and company verification)
+google-search-results>=2.4.2  # For SerpAPI
+# clearbit>=0.1.7  # Optional - For Clearbit company data (uncomment if using)

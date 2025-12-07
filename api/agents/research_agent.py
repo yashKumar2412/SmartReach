@@ -2,10 +2,20 @@
 Lead Research Agent
 
 Searches for and gathers company information based on criteria.
+Now with agentic capabilities: tool usage for verification and data enrichment.
 """
 from typing import List, Dict, Any
+import os
 from .base import BaseAgent, call_llm
 from .prompts import COMPANY_GENERATION_PROMPT, COMPANY_ENRICHMENT_PROMPT
+
+# Import tools (will work even if API keys not set - graceful degradation)
+try:
+    from .tools import verify_company_exists, get_company_data
+    TOOLS_AVAILABLE = True
+except ImportError:
+    TOOLS_AVAILABLE = False
+    print("[RESEARCH AGENT] Tools not available - running in basic mode")
 
 
 class LeadResearchAgent(BaseAgent):
@@ -13,7 +23,12 @@ class LeadResearchAgent(BaseAgent):
     
     def execute(self, product_service: str, area: str, context: str = None, angle: str = None, max_leads: int = 10) -> List[Dict[str, Any]]:
         """
-        Research leads based on criteria
+        Research leads based on criteria with agentic capabilities
+        
+        Now includes:
+        - Company verification using web search (if API key available)
+        - Real company data enrichment (if API key available)
+        - Graceful degradation if tools not available
         
         Args:
             product_service: Product or service being offered
@@ -25,26 +40,72 @@ class LeadResearchAgent(BaseAgent):
             List of lead dictionaries with company information
         """
         try:
-            # Step 1: Generate companies directly using LLM
+            # Step 1: Generate companies using LLM
             companies = self._generate_companies_llm(product_service, area, context, max_leads)
             
-            # Step 2: Enrich company data with LLM
+            # Step 2: Verify and enrich companies using tools (if available)
             enriched_leads = []
             import uuid
+            
             for company in companies:
                 try:
+                    company_name = company.get('name', '')
+                    location = company.get('location', '')
+                    
+                    # Step 2a: Verify company exists (if tools available)
+                    verified = True
+                    if TOOLS_AVAILABLE and os.getenv("SERPAPI_API_KEY") or os.getenv("GOOGLE_SEARCH_API_KEY"):
+                        try:
+                            verified = verify_company_exists(company_name, location)
+                            if not verified:
+                                print(f"[RESEARCH AGENT] Skipping {company_name} - not verified as real company")
+                                continue  # Skip unverified companies
+                        except Exception as e:
+                            print(f"[RESEARCH AGENT] Verification failed for {company_name}: {e}")
+                            # Continue anyway if verification fails
+                    
+                    # Step 2b: Get real company data (if tools available)
+                    if TOOLS_AVAILABLE:
+                        try:
+                            company_data_result = get_company_data(company_name, company.get('website'))
+                            if company_data_result.get("success"):
+                                real_data = company_data_result.get("data", {})
+                                # Merge real data with LLM-generated data
+                                company.update({
+                                    "description": real_data.get("description", company.get("description", "")),
+                                    "website": real_data.get("website", company.get("website", "")),
+                                    "employees": real_data.get("employees", company.get("employees", "Unknown")),
+                                    "verified": verified,
+                                    "data_source": real_data.get("provider", "llm")
+                                })
+                                print(f"[RESEARCH AGENT] Enriched {company_name} with real data from {real_data.get('provider', 'unknown')}")
+                        except Exception as e:
+                            print(f"[RESEARCH AGENT] Data enrichment failed for {company_name}: {e}")
+                            # Continue with LLM data if enrichment fails
+                    
+                    # Step 2c: Enrich with LLM analysis (always done)
                     enriched = self._enrich_company_data(company, product_service, context)
+                    
                     # Ensure each lead has an ID
                     if "id" not in enriched:
                         enriched["id"] = str(uuid.uuid4())
+                    
+                    # Mark as verified if we checked
+                    if TOOLS_AVAILABLE:
+                        enriched["verified"] = verified
+                    
                     enriched_leads.append(enriched)
+                    
                 except Exception as e:
+                    print(f"[RESEARCH AGENT] Error processing {company.get('name', 'Unknown')}: {e}")
                     # Continue with next company even if one fails
                     if "id" not in company:
                         company["id"] = str(uuid.uuid4())
                     enriched_leads.append(company)
             
-            return enriched_leads
+            print(f"[RESEARCH AGENT] Returning {len(enriched_leads)} enriched leads")
+            return enriched_leads[:max_leads]  # Return up to max_leads
+            
         except Exception as e:
             import traceback
             print(f"[RESEARCH AGENT] Error: {str(e)}")

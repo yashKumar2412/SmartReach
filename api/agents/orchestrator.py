@@ -70,18 +70,15 @@ class CampaignOrchestrator:
         loop = asyncio.get_event_loop()
         
         for lead in selected_leads:
-            # Generate content in thread pool to avoid blocking
-            content = await loop.run_in_executor(
+            # Generate content with automatic refinement in thread pool to avoid blocking
+            # This uses the agentic execute_with_refinement method that iteratively improves quality
+            content, quality = await loop.run_in_executor(
                 None,
-                self.content_agent.execute,
-                lead, product_service, context, angle, company_name
-            )
-            
-            # Evaluate quality in thread pool to avoid blocking
-            quality = await loop.run_in_executor(
-                None,
-                self.quality_agent.execute,
-                content, lead, product_service
+                self.content_agent.execute_with_refinement,
+                lead, product_service, context, angle, company_name,
+                self.quality_agent,  # Pass quality agent for refinement
+                80,  # Minimum quality score threshold
+                3    # Maximum refinement iterations
             )
             
             messages.append({
