@@ -26,6 +26,7 @@ class Campaign(Base):
     product_service = Column(String, nullable=False)
     area = Column(String, nullable=False)
     context = Column(Text, nullable=True)
+    angle = Column(Text, nullable=True)  # Value proposition/angle for the campaign
     max_leads = Column(Integer, default=10)
     status = Column(SQLEnum(CampaignStatusEnum), nullable=False, default=CampaignStatusEnum.RESEARCH_IN_PROGRESS)
     leads_found = Column(Integer, default=0)

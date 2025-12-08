@@ -113,6 +113,7 @@ async def start_research(request: ResearchRequest, db: Session = Depends(get_db)
             product_service=request.product_service,
             area=request.area,
             context=request.context,
+            angle=request.angle,
             max_leads=request.max_leads,
             status=CampaignStatusEnum.RESEARCH_IN_PROGRESS,
             leads_found=0,  # Will be updated after research
@@ -152,6 +153,7 @@ async def start_research(request: ResearchRequest, db: Session = Depends(get_db)
             "product_service": request.product_service,
             "area": request.area,
             "context": request.context,
+            "angle": request.angle,
             "max_leads": request.max_leads,
             "leads": leads,
             "status": "research_complete"
@@ -219,7 +221,7 @@ async def generate_content(request: GenerateRequest, db: Session = Depends(get_d
                 "area": db_campaign.area,
                 "context": db_campaign.context,
                 "max_leads": db_campaign.max_leads,
-                "angle": db_campaign.angle,
+                "angle": getattr(db_campaign, 'angle', None),  # Backward compatibility
                 "leads": all_leads,
                 "status": "research_complete"
             }
@@ -440,7 +442,7 @@ async def restore_campaign(campaign_id: str, db: Session = Depends(get_db)):
         "area": db_campaign.area,
         "context": db_campaign.context,
         "max_leads": db_campaign.max_leads,
-        "angle": db_campaign.angle,
+        "angle": getattr(db_campaign, 'angle', None),  # Backward compatibility
         "leads": leads,
         "messages": messages,
         "status": db_campaign.status.value
